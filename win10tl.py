@@ -131,6 +131,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     def __init__(self, settings):
         self.context = None
         self.local_settings = settings
+        self.art_list =[]
         
     def create_temp_directory(self, dir):
         try:
@@ -152,7 +153,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
 
     def create_artifact_type(self, art_name, art_desc, skCase):
         try:
-            skCase.addBlackboardArtifactType(art_name, "LFA: " + art_desc)
+            skCase.addBlackboardArtifactType(art_name, "WTA: " + art_desc)
         except:
             self.log(Level.INFO, "ERROR creating artifact type: " + art_desc)
         art = skCase.getArtifactType(art_name)
@@ -170,7 +171,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     # 'context' is an instance of org.sleuthkit.autopsy.ingest.IngestJobContext.
     # See: http://sleuthkit.org/autopsy/docs/api-docs/3.1/classorg_1_1sleuthkit_1_1autopsy_1_1ingest_1_1_ingest_job_context.html
     def startUp(self, context):
-        self.context = contex
+        self.context = context
         
         if self.local_settings.getFlag():
             self.List_Of_tables.append('associated_file_entries')
@@ -178,8 +179,9 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             self.List_Of_tables.append('program_entries')
         if self.local_settings.getFlag2():
             self.List_Of_tables.append('unassociated_programs')
-        
-       
+        self.temp_dir = Case.getCurrentCase().getTempDirectory()
+        self.create_temp_directory("\WTA")        
+
         
         pass
 
@@ -189,8 +191,69 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     # 'progressBar' is of type org.sleuthkit.autopsy.ingest.DataSourceIngestModuleProgress
     # See: http://sleuthkit.org/autopsy/docs/api-docs/3.1/classorg_1_1sleuthkit_1_1autopsy_1_1ingest_1_1_data_source_ingest_module_progress.html
     def process(self, dataSource, progressBar):
+        blackboard = Case.getCurrentCase().getServices().getBlackboard()
+        skCase = Case.getCurrentCase().getSleuthkitCase()
+        fileManager = Case.getCurrentCase().getServices().getFileManager()
+        files = fileManager.findFiles(dataSource, "ActivitiesCache.db")
+        numFiles = len(files)
+        self.log(Level.INFO, "found " + str(numFiles) + " files")
+        fileCount = 0
+        self.generic_art = {}
 
-        
+        for file in files:
+            wtaDbPath = os.path.join(self.temp_dir + "\WTA", str(file.getId()))
+            ContentUtils.writeToFile(file, File(wtaDbPath))
+            try: 
+               Class.forName("org.sqlite.JDBC").newInstance()
+               dbConn = DriverManager.getConnection("jdbc:sqlite:%s"  % wtaDbPath)
+            except SQLException as e:
+                self.log(Level.INFO, "Could not open database file (not SQLite) " + file.getName() + " (" + e.getMessage() + ")")
+                return IngestModule.ProcessResult.OK
+            try:              
+                stmt = dbConn.createStatement()
+                resultSetTableNames = stmt.executeQuery("Select tbl_name from SQLITE_MASTER;")
+
+                while resultSetTableNames.next():
+                    table_name = resultSetTableNames.getString("tbl_name")
+                    self.log(Level.INFO, "Result get information from table " + table_name + " ")                
+                    self.generic_art[table_name] = self.create_artifact_type("TSK_WTA_"+ table_name.upper(),  table_name+" table", skCase)
+                    col_name_type ={}
+                    generic_atts = {}
+                 
+                    resColNames = stmt.executeQuery("PRAGMA table_info('"+ table_name +"')")
+                    while resColNames.next():
+                        
+                        col_name = resColNames.getString("name")
+                        col_type = resColNames.getString("type")
+                        
+
+                        if(col_type == 'TEXT' or col_type == "DATETIME"):
+                            generic_atts['TSK_'+table_name.upper()+"_"+col_name.upper()] = self.create_attribute_type('TSK_'+table_name.upper()+"_"+col_name.upper(), BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name, skCase)
+                            col_name_type[col_name] = col_type
+                        elif(col_type == 'INT'):
+                            generic_atts['TSK_'+table_name.upper()+"_"+col_name.upper()] = self.create_attribute_type('TSK_'+table_name.upper()+"_"+col_name.upper(), BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name, skCase)
+                            col_name_type[col_name] = col_type
+
+                        self.log(Level.INFO, "Result get information from table " + table_name + " cols name and type"+col_name+" "+col_type)
+                    
+                    resData = stmt.executeQuery("Select * from '"+table_name+"'")
+                    while resData.next():
+                        art = file.newArtifact(self.generic_art[table_name].getTypeID())
+                        for name, c_type in col_name_type.iteritems():
+                            if(c_type == 'INT'):
+                                self.log(Level.INFO, "SUPPOSED TO BE INT,  cols name and type "+name+" "+   c_type)
+                                art.addAttribute(BlackboardAttribute(generic_atts['TSK_'+table_name.upper()+"_"+name.upper()], WintenTimelineIngestModuleFactory.moduleName, str(resData.getInt(name))))
+                            if(c_type == 'TEXT' ):
+                                self.log(Level.INFO, "SUPPOSED TO BE text,  cols name and type "+name+" "+   c_type)
+                                art.addAttribute(BlackboardAttribute(generic_atts['TSK_'+table_name.upper()+"_"+name.upper()], WintenTimelineIngestModuleFactory.moduleName, str(resData.getString(name))))
+                            if(c_type == "DATETIME"):
+                                self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols name and type "+name+" "+   c_type)
+                                art.addAttribute(BlackboardAttribute(generic_atts['TSK_'+table_name.upper()+"_"+name.upper()], WintenTimelineIngestModuleFactory.moduleName, str(resData.getString(name))))
+                        self.index_artifact(blackboard, art, self.generic_art[table_name])
+       
+            except SQLException as e:
+                    self.log(Level.INFO, "Error querying database for timeline table (" + e.getMessage() + ")")
+                    return IngestModule.ProcessResult.OK
         return IngestModule.ProcessResult.OK                
 		
 class Process_timelineWithUISettings(IngestModuleIngestJobSettings):
