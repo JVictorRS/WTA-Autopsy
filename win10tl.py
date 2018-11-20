@@ -3,6 +3,7 @@ import jarray
 import inspect
 import os
 import subprocess
+import time
 
 from javax.swing import JCheckBox
 from javax.swing import JList
@@ -105,6 +106,7 @@ ACTIVITYOPERATION_TABLE_DESC = {
     "OriginalLastModifiedOnClient":	"DATETIME",
     "ETag":	"INT"
 }
+DESC_MAPPER = {"Activity":ACTIVITY_TABLE_DESC, "ActivityOperation":ACTIVITYOPERATION_TABLE_DESC}
 
 # Factory that defines the name and details of the module and allows Autopsy
 # to create instances of the modules that will do the analysis.
@@ -208,6 +210,54 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         
         pass
 
+    def extractTableFromDB(self,table_name,file,dbConn,blackboard,skCase):
+        try:
+
+            art_name = table_name.upper()
+
+            desc = DESC_MAPPER[table_name]
+
+            stmt = dbConn.createStatement()
+            tableContent = stmt.executeQuery("Select * from '"+table_name+"'")
+            self.generic_art = self.create_artifact_type("TSK_WTA_"+art_name,  table_name+" table", skCase)
+            generic_att= {}
+            for name, c_type in desc.iteritems():
+                if(c_type == 'TEXT' or c_type == 'DATETIME' or c_type == 'INT'):
+                    att_name = "TSK_WTA_"+art_name+"_"+name.upper()
+                    generic_att[att_name] = self.create_attribute_type(att_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)                                                
+                self.log(Level.INFO, "Att_name: "+att_name)
+                while tableContent.next():
+                    art = file.newArtifact(self.generic_art.getTypeID())
+                    for nameAux, c_typeAux in desc.iteritems():
+                        att_name = "TSK_WTA_"+art_name+"_"+nameAux.upper()
+                        if(c_typeAux == 'INT'):
+                            self.log(Level.INFO, "SUPPOSED TO BE INT,  cols nameAux and type "+nameAux+" "+   c_typeAux)
+                            foo = tableContent.getInt(nameAux)
+                            if(foo is None):
+                                foo = "N/A"
+                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                        if(c_typeAux == 'TEXT' ):
+                            self.log(Level.INFO, "SUPPOSED TO BE text,  cols nameAux and type "+nameAux+" "+   c_typeAux)
+                            foo = tableContent.getString(nameAux)
+                            if(foo is None):
+                                foo = "N/A"
+                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                        if(c_typeAux == 'DATETIME'):
+                            self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols nameAux and type "+nameAux+" "+   c_typeAux)
+                            foo = tableContent.getString(nameAux)
+                            if(foo is None):
+                                foo = "N/A"
+                            else:
+                                foo = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(long(foo)))
+                            self.log(Level.INFO,"content "+foo)
+                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, foo))
+                    self.index_artifact(blackboard, art, self.generic_art)
+        except SQLException as e:
+            self.log(Level.INFO, "Error querying database for timeline table named "+table_name+" (" + e.getMessage() + ")")
+            return IngestModule.ProcessResult.OK
+
+
+
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
     # See: http://www.sleuthkit.org/sleuthkit/docs/jni-docs/interfaceorg_1_1sleuthkit_1_1datamodel_1_1_content.html
@@ -232,91 +282,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             except SQLException as e:
                 self.log(Level.INFO, "Could not open database file (not SQLite) " + file.getName() + " (" + e.getMessage() + ")")
                 return IngestModule.ProcessResult.OK
-            try:              
-                stmt = dbConn.createStatement()
-                activityInfo= stmt.executeQuery("Select * from ActivityOperation")
-                self.activity_art = self.create_artifact_type("TSK_WTA_ACTIVITY",  "Activity table", skCase)
-                generic_att= {}
-                for name, c_type in ACTIVITYOPERATION_TABLE_DESC.iteritems():
-                    att_name = 'TSK_WTA_ACTIVITYOPERATION_'+name.upper()
-                    if(c_type == 'TEXT' or c_type == "DATETIME" or c_type == 'INT'):
-                        generic_att[att_name] = self.create_attribute_type(att_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)                                                
-                    self.log(Level.INFO, "Att_name: "+att_name)
-
-                while activityInfo.next():
-                    art = file.newArtifact(self.activity_art.getTypeID())
-                    for name, c_type in ACTIVITYOPERATION_TABLE_DESC.iteritems():
-                        att_name = 'TSK_WTA_ACTIVITYOPERATION_'+name.upper()
-                        if(c_type == 'INT'):
-                            self.log(Level.INFO, "SUPPOSED TO BE INT,  cols name and type "+name+" "+   c_type)
-                            foo = activityInfo.getInt(name)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
-                        if(c_type == 'TEXT' ):
-                            self.log(Level.INFO, "SUPPOSED TO BE text,  cols name and type "+name+" "+   c_type)
-                            foo = activityInfo.getString(name)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
-                        if(c_type == "DATETIME"):
-                            self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols name and type "+name+" "+   c_type)
-                            foo = activityInfo.getString(name)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
-                    self.index_artifact(blackboard, art, self.activity_art)
-
-                
-
-
-
-                '''resultSetTableNames = stmt.executeQuery("Select tbl_name from SQLITE_MASTER;") # this is all commented in order to test different approach 
-                                                                                                  # while this is open sqlite in a generic way, next attempt will do things more deterministicly 
-
-                while resultSetTableNames.next():
-                    self.log(Level.INFO, "Table names obtained: "+resultSetTableNames.getString("tbl_name"))                
-                    
-
-                while resultSetTableNames.next():
-                    table_name = resultSetTableNames.getString("tbl_name")
-                    self.log(Level.INFO, "Result get information from table " + table_name + " ")                
-                    self.generic_art[table_name] = self.create_artifact_type("TSK_WTA_"+ table_name.upper(),  table_name+" table", skCase)
-                    col_name_type ={}
-                    generic_atts = {}
-                  
-                    resColNames = stmt.executeQuery("PRAGMA table_info('"+ table_name +"')")
-                    while resColNames.next():
-                        
-                        col_name = resColNames.getString("name")
-                        col_type = resColNames.getString("type")
-                        att_name = 'TSK_'+table_name.upper()+'_'+col_name.upper()
-
-                        if(col_type == 'TEXT' or col_type == "DATETIME" or col_type == 'INT'):
-                            generic_atts[att_name] = self.create_attribute_type(att_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name, skCase)
-                            col_name_type[col_name] = col_type
-                        
-                        self.log(Level.INFO, "Result get information from table " + table_name + " cols name and type "+col_name+" "+col_type)
-
-                    self.log(Level.INFO, "querying table: "+table_name )
-                    resData = stmt.executeQuery("Select * from '"+table_name+"'")
-                    while resData.next():
-                        art = file.newArtifact(self.generic_art[table_name].getTypeID())
-                        self.log(Level.INFO, "MAde new artifact, name: "+self.generic_art[table_name])
-                        for name, c_type in col_name_type.iteritems():
-                            att_name = 'TSK_'+table_name.upper()+'_'+name.upper()
-                            self.log(Level.INFO, "Att_name: "+att_name)
-                            if(c_type == 'INT'):
-                                self.log(Level.INFO, "SUPPOSED TO BE INT,  cols name and type "+name+" "+   c_type)
-                                art.addAttribute(BlackboardAttribute(generic_atts[att_name], WintenTimelineIngestModuleFactory.moduleName, str(resData.getInt(name))))
-                            if(c_type == 'TEXT' ):
-                                self.log(Level.INFO, "SUPPOSED TO BE text,  cols name and type "+name+" "+   c_type + "content  :"+ str(resData.getString(name)))
-                                art.addAttribute(BlackboardAttribute(generic_atts[att_name], WintenTimelineIngestModuleFactory.moduleName, str(resData.getString(name))))
-                            if(c_type == "DATETIME"):
-                                self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols name and type "+name+" "+   c_type)
-                                art.addAttribute(BlackboardAttribute(generic_atts[att_name], WintenTimelineIngestModuleFactory.moduleName, str(resData.getString(name))))
-                        self.index_artifact(blackboard, art, self.generic_art[table_name])
-'''       
+            try:
+                self.extractTableFromDB("ActivityOperation",file,dbConn,blackboard,skCase)
             except SQLException as e:
                     self.log(Level.INFO, "Error querying database for timeline table (" + e.getMessage() + ")")
                     return IngestModule.ProcessResult.OK
