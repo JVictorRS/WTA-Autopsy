@@ -223,35 +223,35 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             generic_att= {}
             for name, c_type in desc.iteritems():
                 if(c_type == 'TEXT' or c_type == 'DATETIME' or c_type == 'INT'):
-                    att_name = "TSK_WTA_"+art_name+"_"+name.upper()
+                    att_name =  name.upper()
                     generic_att[att_name] = self.create_attribute_type(att_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)                                                
                 self.log(Level.INFO, "Att_name: "+att_name)
-                while tableContent.next():
-                    art = file.newArtifact(self.generic_art.getTypeID())
-                    for nameAux, c_typeAux in desc.iteritems():
-                        att_name = "TSK_WTA_"+art_name+"_"+nameAux.upper()
-                        if(c_typeAux == 'INT'):
-                            self.log(Level.INFO, "SUPPOSED TO BE INT,  cols nameAux and type "+nameAux+" "+   c_typeAux)
-                            foo = tableContent.getInt(nameAux)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
-                        if(c_typeAux == 'TEXT' ):
-                            self.log(Level.INFO, "SUPPOSED TO BE text,  cols nameAux and type "+nameAux+" "+   c_typeAux)
-                            foo = tableContent.getString(nameAux)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
-                        if(c_typeAux == 'DATETIME'):
-                            self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols nameAux and type "+nameAux+" "+   c_typeAux)
-                            foo = tableContent.getString(nameAux)
-                            if(foo is None):
-                                foo = "N/A"
-                            else:
-                                foo = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(long(foo)))
-                            self.log(Level.INFO,"content "+foo)
-                            art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, foo))
-                    self.index_artifact(blackboard, art, self.generic_art)
+            while tableContent.next():
+                art = file.newArtifact(self.generic_art.getTypeID())
+                for nameAux, c_typeAux in desc.iteritems():
+                    att_name =  nameAux.upper()
+                    if(c_typeAux == 'INT'):
+                        self.log(Level.INFO, "SUPPOSED TO BE INT,  cols "+nameAux+" and type "+nameAux+" "+   c_typeAux)
+                        foo = tableContent.getInt(nameAux)
+                        if(foo is None):
+                            foo = "N/A"
+                        art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                    if(c_typeAux == 'TEXT' ):
+                        self.log(Level.INFO, "SUPPOSED TO BE text,  cols "+nameAux+" and type "+nameAux+" "+   c_typeAux)
+                        foo = tableContent.getString(nameAux)
+                        if(foo is None):
+                            foo = "N/A"
+                        art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                    if(c_typeAux == 'DATETIME'):
+                        self.log(Level.INFO, "SUPPOSED TO BE datetime,  cols "+nameAux+" and type "+nameAux+" "+   c_typeAux)
+                        foo = tableContent.getInt(nameAux)
+                        if(foo is None):
+                            foo = "N/A"
+                        else:
+                            foo =  time.strftime('%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
+                        self.log(Level.INFO,"content "+foo)
+                        art.addAttribute(BlackboardAttribute(generic_att[att_name], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                self.index_artifact(blackboard, art, self.generic_art)
         except SQLException as e:
             self.log(Level.INFO, "Error querying database for timeline table named "+table_name+" (" + e.getMessage() + ")")
             return IngestModule.ProcessResult.OK
