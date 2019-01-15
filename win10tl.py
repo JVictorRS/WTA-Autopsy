@@ -155,25 +155,25 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
 
         pass
 
-    def extractTableFromDB(self, table_name, file, dbConn, blackboard, skCase):
+    def extractRawDataFromDB(self, table_name, file, dbConn, blackboard, skCase):
         try:
             stmt = dbConn.createStatement()
             tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")
 
             self.raw_data_art = self.create_artifact_type(
-                "TSK_WTA_SmartLU_Raw", "Info from SmartLookup", skCase)
+                    "TSK_WTA_SmartLU_Raw", "Info from SmartLookup", skCase)
+            
             generic_att = {}
 
             md = tableContent.getMetaData()
             numCols = md.getColumnCount()
-            colNames = []
             for i in range(1, numCols + 1):
                 col_name = md.getColumnLabel(i)
-                colNames.append(col_name)
+                self.colNames.append(col_name)
                 generic_att[col_name] = self.create_attribute_type(col_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name.upper(), skCase)
             while tableContent.next():
                 art = file.newArtifact(self.raw_data_art.getTypeID())
-                for name in colNames:
+                for name in self.colNames:
                     if(name in DATETIME_FIELDS):
                         foo = tableContent.getInt(name)
                         if(foo is None):
@@ -189,10 +189,11 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                             foo = "N/A"
                         art.addAttribute(BlackboardAttribute(generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
                 self.index_artifact(blackboard, art, self.raw_data_art)
+            return tableContent
         except SQLException as e:
             self.log(Level.INFO, "Error querying database for timeline table named " +
                      table_name+" (" + e.getMessage() + ")")
-            return IngestModule.ProcessResult.OK
+            return None
 
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
@@ -208,8 +209,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         numFiles = len(files)
         self.log(Level.INFO, "found " + str(numFiles) + " files")
         fileCount = 0
-        self.generic_art = {}
-
+        self.colNames = []
+            
         for file in files:
             wtaDbPath = os.path.join(self.temp_dir + "\WTA", str(file.getId()))
             ContentUtils.writeToFile(file, File(wtaDbPath))
@@ -223,19 +224,22 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 # TODO : instead of return use a continue to keep on cycling
                 return IngestModule.ProcessResult.OK
             try:
-                self.extractTableFromDB(
+                content = self.extractRawDataFromDB(
                     "smartlookup", file, dbConn, blackboard, skCase)
-
+                if content is None:
+                   continue 
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for timeline table (" + e.getMessage() + ")")
                 return IngestModule.ProcessResult.OK
+            try:
+                dbConn.close()
         return IngestModule.ProcessResult.OK
 
 
 class Process_timelineWithUISettings(IngestModuleIngestJobSettings):
     serialVersionUID = 1L
-
+    
     def __init__(self):
         self.flag = False
         self.flag1 = False
