@@ -170,7 +170,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             for i in range(1, numCols + 1):
                 col_name = md.getColumnLabel(i)
                 self.colNames.append(col_name)
-                generic_att[col_name] = self.create_attribute_type(col_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name.upper(), skCase)
+                generic_att[col_name] = self.create_attribute_type(col_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name, skCase)
             while tableContent.next():
                 art = file.newArtifact(self.raw_data_art.getTypeID())
                 for name in self.colNames:
@@ -234,6 +234,9 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 return IngestModule.ProcessResult.OK
             try:
                 dbConn.close()
+            except:
+                None
+        
         return IngestModule.ProcessResult.OK
 
 
