@@ -4,6 +4,7 @@ import inspect
 import os
 import subprocess
 import time
+import json
 
 from javax.swing import JCheckBox
 from javax.swing import JList
@@ -171,6 +172,12 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 col_name = md.getColumnLabel(i)
                 self.colNames.append(col_name)
                 generic_att[col_name] = self.create_attribute_type(col_name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, col_name, skCase)
+            # create Application and Platform columns for AppId properties
+            app_column = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
+            platform_column = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
+            file_or_url_opened_column = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
+            used_program_column = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
+            timezone_column = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
             while tableContent.next():
                 art = file.newArtifact(self.raw_data_art.getTypeID())
                 for name in self.colNames:
@@ -187,7 +194,29 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                         foo = tableContent.getString(name)
                         if(foo is None):
                             foo = "N/A"
-                        art.addAttribute(BlackboardAttribute(generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, str(foo)))
+                        elif(name == 'AppId'):
+                            appIdBlob = json.loads(foo)
+                            application = str(appIdBlob[0]['application'])
+                            platform = str(appIdBlob[0]['platform'])
+                            art.addAttribute(BlackboardAttribute(app_column, WintenTimelineIngestModuleFactory.moduleName, application))
+                            art.addAttribute(BlackboardAttribute(platform_column, WintenTimelineIngestModuleFactory.moduleName, platform))
+                        elif(name == 'Payload'):
+                            payloadBlob = json.loads(foo)
+                            file_or_urlOpened = 'N/A'
+                            used_program = 'N/A'
+                            timezone = 'N/A'
+                            if(art.getAttribute(generic_att['ActivityType']).getValueString() == '5'):
+                                file_or_urlOpened = payloadBlob['displayText']
+                                used_program = payloadBlob['appDisplayName']
+
+                            if(art.getAttribute(generic_att['ActivityType']).getValueString() == '6'):
+                                timezone = payloadBlob['userTimezone']
+
+                            art.addAttribute(BlackboardAttribute(file_or_url_opened_column, WintenTimelineIngestModuleFactory.moduleName, file_or_urlOpened))
+                            art.addAttribute(BlackboardAttribute(used_program_column, WintenTimelineIngestModuleFactory.moduleName, used_program))
+                            art.addAttribute(BlackboardAttribute(timezone_column, WintenTimelineIngestModuleFactory.moduleName, timezone))
+
+                        art.addAttribute(BlackboardAttribute(generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
                 self.index_artifact(blackboard, art, self.raw_data_art)
             return tableContent
         except SQLException as e:
