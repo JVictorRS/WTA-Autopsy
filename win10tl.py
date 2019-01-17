@@ -209,6 +209,29 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 self.generic_att = {}
                 content = self.extractRawDataFromDB("smartlookup", file, dbConn, blackboard, skCase)
                 self.extractProcessedData(content,file,blackboard,skCase)
+                
+                if self.local_settings.getAnomaliesFlag():
+                    stmt = dbConn.createStatement()
+                    etag_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', ETag from SmartLookup where SmartLookup.ETag < (select Value from ManualSequence)")
+                    self.etag_art = self.create_artifact_type("TSK_WTA_ETAG_ANOMALIES", "SmartLookup's registries which have a suspicious ETag", skCase)
+                    self.etag_names_list = ['Id', 'ETag']
+                    while etag_anomalies_content.next():
+                        art = file.newArtifact(self.etag_art.getTypeID())
+                        for name in self.etag_names_list:
+                            if name in DATETIME_FIELDS:
+                                foo = etag_anomalies_content.getInt(name)
+                                if(foo is None):
+                                    foo = "N/A"
+                                else:
+                                    foo = time.strftime('%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
+                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
+                            else:
+                                foo = etag_anomalies_content.getString(name)
+                                self.log(Level.INFO, "NAME:" + name)
+                                if(foo is None):
+                                    foo = "N/A"
+                                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                        self.indexArtifact(blackboard, art, self.etag_art)
                 if content is None:
                    continue 
             except SQLException as e:
