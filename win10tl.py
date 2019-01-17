@@ -154,28 +154,28 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         
         self.temp_dir = Case.getCurrentCase().getTempDirectory()
         self.create_temp_directory("\WTA")
+        skCase = Case.getCurrentCase().getSleuthkitCase()
+        self.generic_att = {}
+        #create lists for each type of artefact
+        self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
+        self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
+        #create atts for the entire extraction 
+        for name in self.raw_names_list:
+            self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
+        # create Application and Platform columns for AppId properties
+        self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
+        self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
+        self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
+        self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
+        self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
+        #create main art
+        self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
+        #create raw art if applicable
+        if self.local_settings.getRawFlag():
+            self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
 
         pass
-    #def createAllAttsAndArts(self,skCase):
-    #    
-    #    #create lists for each type of artefact
-    #    self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
-    #    self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
-    #    #create atts for the entire extraction 
-    #    for name in self.raw_names_list:
-    #        self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
-    #    # create Application and Platform columns for AppId properties
-    #    self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
-    #    self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
-    #    self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
-    #    self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
-    #    self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
-    #    #create main art
-    #    self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
-    #    #create raw art if applicable
-    #    if self.local_settings.getRawFlag():
-    #        self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
-#
+   
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
     # See: http://www.sleuthkit.org/sleuthkit/docs/jni-docs/interfaceorg_1_1sleuthkit_1_1datamodel_1_1_content.html
@@ -205,16 +205,19 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 # TODO : instead of return use a continue to keep on cycling
                 return IngestModule.ProcessResult.OK
             try:
-                #self.createAllAttsAndArts(skCase,blackboard,file)
-                self.generic_att = {}
-                content = self.extractRawDataFromDB("smartlookup", file, dbConn, blackboard, skCase)
-                self.extractProcessedData(content,file,blackboard,skCase)
-                if content is None:
-                   continue 
+                
+            # if set to do so, extract and place on artifact all raw info 
+                if self.local_settings.getRawFlag():
+                    stmt = dbConn.createStatement()
+                    tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                  
+                    self.extractRawDataFromDB(tableContent, file, blackboard, skCase)
+                stmt = dbConn.createStatement()
+                tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
+                self.extractProcessedData(tableContent,file,blackboard,skCase)
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for smartlookup table (" + e.getMessage() + ")")
-                return IngestModule.ProcessResult.OK
+                continue
             try:
                 dbConn.close()
             except:
@@ -223,98 +226,73 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         return IngestModule.ProcessResult.OK
 
 
-    def extractRawDataFromDB(self, table_name, file, dbConn, blackboard, skCase):
+    def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
-            #create lists for each type of artefact
-            self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
-            self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
-            #create atts for the entire extraction 
-            for name in self.raw_names_list:
-                self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
-            # create Application and Platform columns for AppId properties
-            self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
-            self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
-            self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
-            self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
-            self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
-            #create main art
-            self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
-            #create raw art if applicable
-            if self.local_settings.getRawFlag():
-                self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
-
-            #query raw
-            stmt = dbConn.createStatement()
-            tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")  
-            self.log(Level.INFO,'number of gen atts: '+str(len(self.generic_att)))
-            # if set to do so, extract and place on artifact all raw info 
-            if self.local_settings.getRawFlag():
-                while tableContent.next():
-                    art = file.newArtifact(self.raw_data_art.getTypeID())
-                    for name in self.raw_names_list:
-                        if(name in DATETIME_FIELDS):
-                            foo = tableContent.getInt(name)
-                            if(foo is None):
-                                foo = "N/A"
-                            else:
-                                foo = time.strftime(
-                                    '%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
-                            art.addAttribute(BlackboardAttribute(
-                                self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
+            while tableContent.next():
+                art = file.newArtifact(self.raw_data_art.getTypeID())
+                for name in self.raw_names_list:
+                    if(name in DATETIME_FIELDS):
+                        foo = tableContent.getInt(name)
+                        if(foo is None):
+                            foo = "N/A"
                         else:
-                            foo = tableContent.getString(name)
-                            if(foo is None):
-                                foo = "N/A"
-                            art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-                    self.index_artifact(blackboard, art, self.raw_data_art)
-            return tableContent
-        except SQLException as e:
-            self.log(Level.INFO, "Error querying database for timeline table named " +
-                     table_name+" (" + e.getMessage() + ")")
+                            foo = time.strftime(
+                                '%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
+                        art.addAttribute(BlackboardAttribute(
+                            self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
+                    else:
+                        foo = tableContent.getString(name)
+                        if(foo is None):
+                            foo = "N/A"
+                        art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                self.index_artifact(blackboard, art, self.raw_data_art)
+        except Exception as e:
             return None
 
 
     def extractProcessedData(self, tableContent, file, blackboard, skCase):
-
-        while tableContent.next():
-            art = file.newArtifact(self.proc_data_art.getTypeID())
-            for name in self.proc_names_list:
-                if(name in DATETIME_FIELDS):
-                    foo = tableContent.getInt(name)
-                    if(foo is None):
-                        foo = "N/A"
-                    else:
-                        foo = time.strftime(
-                            '%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
-                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
-                else:
-                    foo = tableContent.getString(name)
-                    if(foo is None):
-                        foo = "N/A"
-                        art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-                    else:
-                        if(name == 'AppId'):
-                            appIdBlob = json.loads(foo)
-                            application = str(appIdBlob[0]['application'])
-                            platform = str(appIdBlob[0]['platform'])
-                            art.addAttribute(BlackboardAttribute(self.json_app_att, WintenTimelineIngestModuleFactory.moduleName, application))
-                            art.addAttribute(BlackboardAttribute(self.json_platform_att, WintenTimelineIngestModuleFactory.moduleName, platform))
-                        elif(name == 'Payload'):
-                            payloadBlob = json.loads(foo)
-                            file_or_urlOpened = 'N/A'
-                            used_program = 'N/A'
-                            timezone = 'N/A'
-                            if(tableContent.getString('ActivityType') == '5'):
-                                file_or_urlOpened = payloadBlob['displayText']
-                                used_program = payloadBlob['appDisplayName']
-                            else:
-                                timezone = payloadBlob['userTimezone']
-                            art.addAttribute(BlackboardAttribute(self.json_file_or_url_opened_att, WintenTimelineIngestModuleFactory.moduleName, file_or_urlOpened))
-                            art.addAttribute(BlackboardAttribute(self.json_used_program_att, WintenTimelineIngestModuleFactory.moduleName, used_program))
-                            art.addAttribute(BlackboardAttribute(self.json_timezone_att, WintenTimelineIngestModuleFactory.moduleName, timezone))
+        try:
+            while tableContent.next():
+                art = file.newArtifact(self.proc_data_art.getTypeID())
+                for name in self.proc_names_list:
+                    if(name in DATETIME_FIELDS):
+                        foo = tableContent.getInt(name)
+                        if(foo is None):
+                            foo = "N/A"
                         else:
+                            foo = time.strftime(
+                                '%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
+                        art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
+                    else:
+                        foo = tableContent.getString(name)
+                        if(foo is None):
+                            foo = "N/A"
                             art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-            self.index_artifact(blackboard, art, self.proc_data_art)
+                        else:
+                            if(name == 'AppId'):
+                                appIdBlob = json.loads(foo)
+                                application = str(appIdBlob[0]['application'])
+                                platform = str(appIdBlob[0]['platform'])
+                                art.addAttribute(BlackboardAttribute(self.json_app_att, WintenTimelineIngestModuleFactory.moduleName, application))
+                                art.addAttribute(BlackboardAttribute(self.json_platform_att, WintenTimelineIngestModuleFactory.moduleName, platform))
+                            elif(name == 'Payload'):
+                                payloadBlob = json.loads(foo)
+                                file_or_urlOpened = 'N/A'
+                                used_program = 'N/A'
+                                timezone = 'N/A'
+                                if(tableContent.getString('ActivityType') == '5'):
+                                    file_or_urlOpened = payloadBlob['displayText']
+                                    used_program = payloadBlob['appDisplayName']
+                                else:
+                                    timezone = payloadBlob['userTimezone']
+                                art.addAttribute(BlackboardAttribute(self.json_file_or_url_opened_att, WintenTimelineIngestModuleFactory.moduleName, file_or_urlOpened))
+                                art.addAttribute(BlackboardAttribute(self.json_used_program_att, WintenTimelineIngestModuleFactory.moduleName, used_program))
+                                art.addAttribute(BlackboardAttribute(self.json_timezone_att, WintenTimelineIngestModuleFactory.moduleName, timezone))
+                            else:
+                                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                self.index_artifact(blackboard, art, self.proc_data_art)
+        except Exception as e:
+            return None
    
 
 class Process_timelineWithUISettings(IngestModuleIngestJobSettings):
