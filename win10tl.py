@@ -318,7 +318,6 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                                     self.log(Level.INFO, StringUtil.fromBytes(StringUtil.toBytes(key['DeviceModel'].value())).encode('utf-8'))
                                     self.log(Level.INFO, StringUtil.fromBytes(StringUtil.toBytes(key['DeviceMake'].value())).encode('utf-8'))
                                     #self.log(Level.INFO, key['DeviceMake'].value().encode('utf-16'))
-                                    return 
                                     art.addAttribute(BlackboardAttribute(self.device_name, WintenTimelineIngestModuleFactory.moduleName, key['DeviceName'].value().encode('utf-16be')))
                                     art.addAttribute(BlackboardAttribute(self.device_model, WintenTimelineIngestModuleFactory.moduleName, key['DeviceModel'].value().encode('utf-16be')))
                                     art.addAttribute(BlackboardAttribute(self.device_maker, WintenTimelineIngestModuleFactory.moduleName, key['DeviceMake'].value().encode('utf-16be')))
