@@ -145,12 +145,22 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     def startUp(self, context):
         self.context = context
 
-        if self.local_settings.getFlag():
+        if self.local_settings.getRawFlag():
+            self.log(Level.INFO,' all flags working')
+        if self.local_settings.getRegistryFlag():
+            self.log(Level.INFO,' all flags working')
+        if self.local_settings.getAnomaliesFlag():
+            self.log(Level.INFO,' all flags working')
+
+
+        '''
+        if self.local_settings.getRawFlag():
             self.List_Of_tables.append('associated_file_entries')
-        if self.local_settings.getFlag1():
+        if self.local_settings.getRegistryFlag():
             self.List_Of_tables.append('program_entries')
-        if self.local_settings.getFlag2():
-            self.List_Of_tables.append('unassociated_programs')
+        if self.local_settings.getAnomaliesFlag():
+            self.List_Of_tables.append('unassociated_programs')'''
+
         self.temp_dir = Case.getCurrentCase().getTempDirectory()
         self.create_temp_directory("\WTA")
 
@@ -281,19 +291,19 @@ class Process_timelineWithUISettings(IngestModuleIngestJobSettings):
         return serialVersionUID
 
     # TODO: Define getters and settings for data you want to store from UI
-    def getFlag(self):
+    def getRawFlag(self):
         return self.flag
 
     def setFlag(self, flag):
         self.flag = flag
 
-    def getFlag1(self):
+    def getRegistryFlag(self):
         return self.flag1
 
     def setFlag1(self, flag1):
         self.flag1 = flag1
 
-    def getFlag2(self):
+    def getAnomaliesFlag(self):
         return self.flag2
 
     def setFlag2(self, flag2):
@@ -346,11 +356,11 @@ class Process_AmcacheWithUISettingsPanel(IngestModuleIngestJobSettingsPanel):
         self.panel1.setLayout(BoxLayout(self.panel1, BoxLayout.Y_AXIS))
         self.panel1.setAlignmentY(JComponent.LEFT_ALIGNMENT)
         self.checkbox = JCheckBox(
-            "Associate File Entries", actionPerformed=self.checkBoxEvent)
+            "Extract raw table", actionPerformed=self.checkBoxEvent)
         self.checkbox1 = JCheckBox(
-            "Program Entries", actionPerformed=self.checkBoxEvent)
+            "Search ntuser.dat for matches", actionPerformed=self.checkBoxEvent)
         self.checkbox2 = JCheckBox(
-            "Unassociated Programs", actionPerformed=self.checkBoxEvent)
+            "Search for date-time anomalies (this may take a few minutes more)", actionPerformed=self.checkBoxEvent)
         self.panel1.add(self.checkbox)
         self.panel1.add(self.checkbox1)
         self.panel1.add(self.checkbox2)
@@ -359,9 +369,9 @@ class Process_AmcacheWithUISettingsPanel(IngestModuleIngestJobSettingsPanel):
     # TODO: Update this for your UI
 
     def customizeComponents(self):
-        self.checkbox.setSelected(self.local_settings.getFlag())
-        self.checkbox1.setSelected(self.local_settings.getFlag1())
-        self.checkbox2.setSelected(self.local_settings.getFlag2())
+        self.checkbox.setSelected(self.local_settings.getRawFlag())
+        self.checkbox1.setSelected(self.local_settings.getRegistryFlag())
+        self.checkbox2.setSelected(self.local_settings.getAnomaliesFlag())
 
     # Return the settings used
     def getSettings(self):
