@@ -144,7 +144,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     # See: http://sleuthkit.org/autopsy/docs/api-docs/3.1/classorg_1_1sleuthkit_1_1autopsy_1_1ingest_1_1_ingest_job_context.html
     def startUp(self, context):
         self.context = context
-
+        self.generic_att = {}
         if self.local_settings.getRawFlag():                #testing 
             self.log(Level.INFO,' all flags working')       #testing 
         if self.local_settings.getRegistryFlag():           #testing 
@@ -152,17 +152,17 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         if self.local_settings.getAnomaliesFlag():          #testing 
             self.log(Level.INFO,' all flags working')       #testing 
         
-        self.createAllAttsAndArts()
         self.temp_dir = Case.getCurrentCase().getTempDirectory()
         self.create_temp_directory("\WTA")
 
         pass
-    def createAllAttsAndArts(self):
+    def createAllAttsAndArts(self,skCase):
+        
         #create lists for each type of artefact
         self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
         self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
         #create atts for the entire extraction 
-        for name in names_list:
+        for name in self.raw_names_list:
             self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
         # create Application and Platform columns for AppId properties
         self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
@@ -186,6 +186,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         blackboard = Case.getCurrentCase().getServices().getBlackboard()
         skCase = Case.getCurrentCase().getSleuthkitCase()
         fileManager = Case.getCurrentCase().getServices().getFileManager()
+        self.createAllAttsAndArts(skCase)
         files = fileManager.findFiles(dataSource, "ActivitiesCache.db")
         numFiles = len(files)
         self.log(Level.INFO, "found " + str(numFiles) + " files")
@@ -227,6 +228,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             #query raw
             stmt = dbConn.createStatement()
             tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")  
+            #self.log(Level.INFO,'number of gen atts: '+str(len(self.generic_att)))
             # if set to do so, extract and place on artifact all raw info 
             if self.local_settings.getRawFlag():
                 while tableContent.next():
@@ -258,7 +260,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
 
         while tableContent.next():
             art = file.newArtifact(self.proc_data_art.getTypeID())
-            for name in self.names_list:
+            for name in self.proc_names_list:
                 if(name in DATETIME_FIELDS):
                     foo = tableContent.getInt(name)
                     if(foo is None):
