@@ -144,7 +144,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
     # See: http://sleuthkit.org/autopsy/docs/api-docs/3.1/classorg_1_1sleuthkit_1_1autopsy_1_1ingest_1_1_ingest_job_context.html
     def startUp(self, context):
         self.context = context
-        self.generic_att = {}
+        
         if self.local_settings.getRawFlag():                #testing 
             self.log(Level.INFO,' all flags working')       #testing 
         if self.local_settings.getRegistryFlag():           #testing 
@@ -154,28 +154,29 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         
         self.temp_dir = Case.getCurrentCase().getTempDirectory()
         self.create_temp_directory("\WTA")
-
+        skCase = Case.getCurrentCase().getSleuthkitCase()
+        self.generic_att = {}
+        #create lists for each type of artefact
+        self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
+        self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
+        #create atts for the entire extraction 
+        for name in self.raw_names_list:
+            self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
+        # create Application and Platform columns for AppId properties
+        self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
+        self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
+        self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
+        self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
+        self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
+        #create main art
+        self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
+        #create raw art if applicable
+        if self.local_settings.getRawFlag():
+            self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
+        self.etag_art = self.create_artifact_type("TSK_WTA_ETAG_ANOMALIES", "SmartLookup's registries which have a suspicious ETag", skCase)
+        self.etag_names_list = ['Id', 'ETag']
         pass
-    #def createAllAttsAndArts(self,skCase):
-    #    
-    #    #create lists for each type of artefact
-    #    self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
-    #    self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
-    #    #create atts for the entire extraction 
-    #    for name in self.raw_names_list:
-    #        self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
-    #    # create Application and Platform columns for AppId properties
-    #    self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
-    #    self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
-    #    self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
-    #    self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
-    #    self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
-    #    #create main art
-    #    self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
-    #    #create raw art if applicable
-    #    if self.local_settings.getRawFlag():
-    #        self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
-#
+    
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
     # See: http://www.sleuthkit.org/sleuthkit/docs/jni-docs/interfaceorg_1_1sleuthkit_1_1datamodel_1_1_content.html
@@ -205,35 +206,30 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 # TODO : instead of return use a continue to keep on cycling
                 return IngestModule.ProcessResult.OK
             try:
-                #self.createAllAttsAndArts(skCase,blackboard,file)
-                self.generic_att = {}
-                content = self.extractRawDataFromDB("smartlookup", file, dbConn, blackboard, skCase)
-                self.extractProcessedData(content,file,blackboard,skCase)
+                
+                if self.local_settings.getRawFlag():
+                    stmt = dbConn.createStatement()
+                    tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                  
+                    self.extractRawDataFromDB(tableContent, file, blackboard, skCase)
+                stmt = dbConn.createStatement()
+                tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
+                self.extractProcessedData(tableContent,file,blackboard,skCase)
                 
                 if self.local_settings.getAnomaliesFlag():
                     stmt = dbConn.createStatement()
                     etag_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', ETag from SmartLookup where SmartLookup.ETag < (select Value from ManualSequence)")
-                    self.etag_art = self.create_artifact_type("TSK_WTA_ETAG_ANOMALIES", "SmartLookup's registries which have a suspicious ETag", skCase)
-                    self.etag_names_list = ['Id', 'ETag']
+                    if len(etag_anomalies_content)  == 0:
+                        self.log(Level.INFO, "wowzerz") 
                     while etag_anomalies_content.next():
                         art = file.newArtifact(self.etag_art.getTypeID())
                         for name in self.etag_names_list:
-                            if name in DATETIME_FIELDS:
-                                foo = etag_anomalies_content.getInt(name)
-                                if(foo is None):
-                                    foo = "N/A"
-                                else:
-                                    foo = time.strftime('%H:%M:%S %Y-%m-%d', time.localtime(long(foo)))
-                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo))
-                            else:
-                                foo = etag_anomalies_content.getString(name)
-                                self.log(Level.INFO, "NAME:" + name)
-                                if(foo is None):
-                                    foo = "N/A"
-                                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                            foo = etag_anomalies_content.getString(name)
+                            self.log(Level.INFO, "NAME:" + name)
+                            if(foo is None):
+                                foo = "N/A"
+                            art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
                         self.indexArtifact(blackboard, art, self.etag_art)
-                if content is None:
-                   continue 
+               
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for smartlookup table (" + e.getMessage() + ")")
@@ -248,23 +244,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
 
     def extractRawDataFromDB(self, table_name, file, dbConn, blackboard, skCase):
         try:
-            #create lists for each type of artefact
-            self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
-            self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
-            #create atts for the entire extraction 
-            for name in self.raw_names_list:
-                self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
-            # create Application and Platform columns for AppId properties
-            self.json_app_att = self.create_attribute_type('Application', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Application', skCase)
-            self.json_platform_att = self.create_attribute_type('Platform', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Platform', skCase)
-            self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
-            self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
-            self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
-            #create main art
-            self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
-            #create raw art if applicable
-            if self.local_settings.getRawFlag():
-                self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
+           
 
             #query raw
             stmt = dbConn.createStatement()
