@@ -170,8 +170,13 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
         self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
         self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
+        self.cfg_active_att = self.create_attribute_type('User Timeline Status', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User timeline status', skCase)
+        self.cfg_userId_att = self.create_attribute_type('User Id', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User Id', skCase)
+        self.cfg_up_to_cloud_att = self.create_attribute_type('Sync with cloud', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Sync with cloud', skCase)
+        self.cfg_collect_att = self.create_attribute_type('Windows collect Activities', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Windows collect Activities', skCase)
         #create main art
         self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
+        self.config_art = self.create_artifact_type("TSK_WTA_Config", "Data from config file", skCase)
         #create raw art if applicable
         if self.local_settings.getRawFlag():
             self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
@@ -210,16 +215,18 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                          file.getName() + " (" + e.getMessage() + ")")
                 
                 return IngestModule.ProcessResult.OK
+
+            full_path = (file.getParentPath() + file.getName()) 
+            split = full_path.split('/')
+            cdPath = '/'.join(split[:-3])
+            cdpconfig = fileManager.findFiles(dataSource, 'CDPGlobalSettings.cdp' ,cdPath)[0]
+            self.cdpconfigPath = os.path.join(self.temp_dir , str(cdpconfig.getId()))
+            ContentUtils.writeToFile(cdpconfig, File(self.cdpconfigPath))
             if self.local_settings.getRegistryFlag():
-                full_path = (file.getParentPath() + file.getName()) #
-                #            /LogicalFileSet1/Users/Meme/AppData/Local/ConnectedDevicesPlatform/AAD.a5c082ec-f2f6-4f3c-8441-c8ad5df27087/ActivitiesCache.db
-                split = full_path.split('/')
-                i = split.index('Users')
-                dsPath = '/'.join(split[:i+2])
+                dsPath = '/'.join(split[:-6])
                 ntuser = fileManager.findFiles(dataSource, 'NTUSER.DAT' ,dsPath)[0]
                 self.ntuserPath = os.path.join(self.temp_dir , str(ntuser.getId()))
                 ContentUtils.writeToFile(ntuser, File(self.ntuserPath))
-            
             
             try: 
                 self.regValues = {}
@@ -231,6 +238,9 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 stmt = dbConn.createStatement()
                 tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
                 self.extractProcessedData(tableContent,file,blackboard,skCase)
+
+
+                self.extractConfigFileInfo(file,blackboard,skCase)
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for smartlookup table (" + e.getMessage() + ")")
@@ -242,6 +252,26 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         
         return IngestModule.ProcessResult.OK
 
+    def extractConfigFileInfo(self,file,blackboard,skCase):
+        try:
+            with open(self.cdpconfigPath) as f:
+                data = f.read()
+                j = json.loads(data.decode('utf-8-sig').encode('utf-8'))
+                coll = 'Disabled' if j['AfcPrivacySettings']['PublishUserActivity'] else 'Enabled'
+                syncCloud = 'Disabled' if j['AfcPrivacySettings']['UploadUserActivity'] else 'Enabled'
+                listUsers = j['ActivityStoreInfo']
+                for user in listUsers:
+                    art= file.newArtifact(self.config_art.getTypeID())
+                    userActive = 'Enabled' if user['active'] else 'Disabled'
+                    userid = user['stableUserId'].encode('utf-8')
+                    art.addAttribute(BlackboardAttribute(self.cfg_userId_att,WintenTimelineIngestModuleFactory.moduleName,userid))                    
+                    art.addAttribute(BlackboardAttribute(self.cfg_active_att,WintenTimelineIngestModuleFactory.moduleName,userActive))
+                    art.addAttribute(BlackboardAttribute(self.cfg_collect_att,WintenTimelineIngestModuleFactory.moduleName,coll))
+                    art.addAttribute(BlackboardAttribute(self.cfg_up_to_cloud_att,WintenTimelineIngestModuleFactory.moduleName,syncCloud))
+                    self.index_artifact(blackboard,art,self.config_art)
+        except Exception as e:
+            self.log(Level.SEVERE, str(e))
+            return None
 
     def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
@@ -264,6 +294,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                         art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
                 self.index_artifact(blackboard, art, self.raw_data_art)
         except Exception as e:
+            self.log(Level.SEVERE, str(e))
             return None
 
 
