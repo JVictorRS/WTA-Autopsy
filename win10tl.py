@@ -160,6 +160,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
         self.etag_names_list = ['Id', 'ETag']
         self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
+        self.etag_names_list = ['Id', 'ETag']
+        self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
         #create atts for the entire extraction 
         for name in self.raw_names_list:
             self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
@@ -175,8 +177,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         if self.local_settings.getRawFlag():
             self.raw_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Raw", "Raw content from SmartLookup", skCase)
         if self.local_settings.getAnomaliesFlag():           
-            self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)
-        
+            self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)       
+            self.payload_art = self.create_artifact_type("TSK_WTA_P_ANOMALIES", "SmartLookup anomalous payload content", skCase)
    
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
@@ -193,11 +195,6 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.log(Level.INFO, "found " + str(numFiles) + " files")
         fileCount = 0
         self.colNames = []
-        if self.local_settings.getAnomaliesFlag():           
-            self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)
-            self.etag_names_list = ['Id', 'ETag']
-            self.payload_art = self.create_artifact_type("TSK_WTA_P_ANOMALIES", "SmartLookup anomalous payload content", skCase)
-            self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
         for file in files:
             wtaDbPath = os.path.join(self.temp_dir + "\WTA", str(file.getId()))
             ContentUtils.writeToFile(file, File(wtaDbPath))
@@ -210,8 +207,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                          file.getName() + " (" + e.getMessage() + ")")
                 # TODO : instead of return use a continue to keep on cycling
                 return IngestModule.ProcessResult.OK
-            try:
-                
+            try:                
                 # if set to do so, extract and place on artifact all raw info 
                 if self.local_settings.getRawFlag():
                     stmt = dbConn.createStatement()
@@ -219,35 +215,18 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     self.extractRawDataFromDB(tableContent, file, blackboard, skCase)
                 stmt = dbConn.createStatement()
                 tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
-                self.extractProcessedData(tableContent,file,blackboard,skCase)
+                #self.extractProcessedData(tableContent,file,blackboard,skCase)
                 #if set to do so check for anomalies
                 if self.local_settings.getAnomaliesFlag():
-                    stmt = dbConn.createStatement()
                     # ETag anomalies
-                    etag_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', ETag from SmartLookup where SmartLookup.ETag > (select Value from ManualSequence)")
-                    if not etag_anomalies_content.isBeforeFirst():
-                        self.log(Level.INFO, "ETag anomalies found")
-                        self.checkForAnomalies(etag_anomalies_content,file,blackboard,skCase)
-                    else:
-                        self.log(Level.INFO, "ETag anomalies not found")
-                        art = file.newArtifact(self.etag_art.getTypeID())
-                        art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-                        art.addAttribute(BlackboardAttribute(self.generic_att['ETag'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-                        self.index_artifact(blackboard, art, self.etag_art)
+                    stmt = dbConn.createStatement()
+                    etag_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', ETag from SmartLookup where SmartLookup.ETag > (select Value from ManualSequence)")                    
+                    self.checkForAnomalies(etag_anomalies_content,file,blackboard,skCase)
                     # Payload anomalies
                     stmt = dbConn.createStatement()
                     payload_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', OriginalPayload, Payload from SmartLookup where ifnull(Payload, '') != ifnull(OriginalPayload, '')")
-                    if not payload_anomalies_content.isBeforeFirst():
-                        self.log(Level.INFO, "Payload anomalies found")
-                        self.checkForPayloadAnomalies(payload_anomalies_content, file, blackboard, skCase)
-                    else:
-                        self.log(Level.INFO, "Payload anomalies not found")
-                        art = file.newArtifact(self.payload_art.getTypeID())
-                        art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-                        art.addAttribute(BlackboardAttribute(self.generic_att['OriginalPayload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-                        art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-                        self.index_artifact(blackboard, art, self.payload_art)
-
+                    self.checkForPayloadAnomalies(payload_anomalies_content, file, blackboard, skCase)
+                    
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for smartlookup table (" + e.getMessage() + ")")
@@ -260,7 +239,9 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         return IngestModule.ProcessResult.OK
 
     def checkForAnomalies(self, tableContent, file, blackboard, skCase):
+        isEmpty = True
         while tableContent.next():
+            isEmpty =False
             art = file.newArtifact(self.etag_art.getTypeID())
             for name in self.etag_names_list:
                 foo = tableContent.getString(name)
@@ -269,9 +250,18 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     foo = "N/A"
                 art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
             self.index_artifact(blackboard, art, self.etag_art)
+        if isEmpty:
+            self.log(Level.INFO, "ETag anomalies not found")
+            art = file.newArtifact(self.etag_art.getTypeID())
+            art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+            art.addAttribute(BlackboardAttribute(self.generic_att['ETag'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+            self.index_artifact(blackboard, art, self.etag_art)
+                    
 
     def checkForPayloadAnomalies(self, tableContent, file, blackboard, skCase):
+        isEmpty = True
         while tableContent.next():
+            isEmpty = False
             art = file.newArtifact(self.payload_art.getTypeID())
             for name in self.payload_names_list:
                 foo = tableContent.getString(name)
@@ -280,6 +270,14 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     foo = "N/A"
                 art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
             self.index_artifact(blackboard, art, self.payload_art)
+        if isEmpty:
+            self.log(Level.INFO, "Payload anomalies not found")
+            art = file.newArtifact(self.payload_art.getTypeID())
+            art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+            art.addAttribute(BlackboardAttribute(self.generic_att['OriginalPayload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+            art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+            self.index_artifact(blackboard, art, self.payload_art)
+
 
     def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
