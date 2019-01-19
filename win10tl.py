@@ -1,10 +1,12 @@
-
+# -*- coding: utf-8 -*-
 import jarray
 import inspect
 import os
 import subprocess
 import time
 import json
+import sys
+import string as stringModule
 
 from javax.swing import JCheckBox
 from javax.swing import JList
@@ -314,18 +316,25 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                                 else:
                                     hive = Registry.Registry(self.ntuserPath)
                                     key = hive.open("Software\\Microsoft\\Windows\\CurrentVersion\\TaskFlow\\DeviceCache\\"+name_val)
-                                                                 
-                                    self.log(Level.INFO, StringUtil.fromBytes(StringUtil.toBytes(key['DeviceModel'].value())).encode('utf-8'))
-                                    self.log(Level.INFO, StringUtil.fromBytes(StringUtil.toBytes(key['DeviceMake'].value())).encode('utf-8'))
-                                    #self.log(Level.INFO, key['DeviceMake'].value().encode('utf-16'))
-                                    art.addAttribute(BlackboardAttribute(self.device_name, WintenTimelineIngestModuleFactory.moduleName, key['DeviceName'].value().encode('utf-16be')))
-                                    art.addAttribute(BlackboardAttribute(self.device_model, WintenTimelineIngestModuleFactory.moduleName, key['DeviceModel'].value().encode('utf-16be')))
-                                    art.addAttribute(BlackboardAttribute(self.device_maker, WintenTimelineIngestModuleFactory.moduleName, key['DeviceMake'].value().encode('utf-16be')))
                                     aux = {1:"Xbox One", 6:"Apple iPhone", 7:"Apple iPad", 8:"Android device", 9:"Windows 10 Desktop", 11:"Windows 10 Phone", 12:"Linux device", 13:"Windows  IoT", 14:"Surface Hub", 15:"Windows Laptop"}                                
-                                    art.addAttribute(BlackboardAttribute(self.device_type, WintenTimelineIngestModuleFactory.moduleName, aux[key['DeviceType'].value()].encode('utf-8')))
-                                    self.regValues[name_val] = [key['DeviceName'].value().encode('utf-8'),key['DeviceModel'].value().encode('utf-8'),key['DeviceMake'].value().encode('utf-8'),aux[key['DeviceType'].value()].encode('utf-8')]
-                                
+                                    listVals = []
 
+                                    for keyname in ['DeviceName','DeviceModel','DeviceMake']: #this is some monkey-level fix for weird decoding
+                                        charList  = []
+                                        byteString = bytes(key[keyname].value().encode('utf-16be'))                                                                  
+                                        for c in byteString:
+                                            if c in stringModule.printable:
+                                                charList.append(c)                                            
+                                        stringFixed = ''.join(charList)
+                                        self.log(Level.INFO, stringFixed)
+                                        listVals.append(stringFixed)
+                                        
+                                    listVals.append(aux[key['DeviceType'].value()].encode('utf-8'))
+                                    art.addAttribute(BlackboardAttribute(self.device_name, WintenTimelineIngestModuleFactory.moduleName,  listVals[0]))
+                                    art.addAttribute(BlackboardAttribute(self.device_model, WintenTimelineIngestModuleFactory.moduleName, listVals[1]))
+                                    art.addAttribute(BlackboardAttribute(self.device_maker, WintenTimelineIngestModuleFactory.moduleName, listVals[2]))
+                                    art.addAttribute(BlackboardAttribute(self.device_type, WintenTimelineIngestModuleFactory.moduleName,  listVals[3]))
+                                    self.regValues[name_val] = listVals
                             else:
                                 art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
                                 
