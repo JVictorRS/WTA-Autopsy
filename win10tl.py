@@ -1,9 +1,12 @@
+
 import jarray
 import inspect
 import os
 import subprocess
 import time
 import json
+import sys
+import string as stringModule
 
 from javax.swing import JCheckBox
 from javax.swing import JList
@@ -18,8 +21,8 @@ from javax.swing import JFrame
 from javax.swing import JScrollPane
 from javax.swing import JComponent
 from java.awt.event import KeyListener
-
-
+from org.python.core.util import StringUtil
+from Registry import Registry
 from java.lang import Class
 from java.lang import System
 from java.sql import DriverManager, SQLException
@@ -184,6 +187,18 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)       
             self.payload_art = self.create_artifact_type("TSK_WTA_P_ANOMALIES", "SmartLookup anomalous payload content", skCase)
             self.update_timestamp_art = self.create_artifact_type("TSK_WTA_T_ANOMALIES", "Metadata anomalous update timestamp", skCase)
+
+        self.cfg_active_att = self.create_attribute_type('User Timeline Status', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User timeline status', skCase)
+        self.cfg_userId_att = self.create_attribute_type('User Id', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User Id', skCase)
+        self.cfg_up_to_cloud_att = self.create_attribute_type('Sync with cloud', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Sync with cloud', skCase)
+        self.cfg_collect_att = self.create_attribute_type('Windows collect Activities', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Windows collect Activities', skCase)
+        self.config_art = self.create_artifact_type("TSK_WTA_Config", "Data from config file", skCase)
+        if self.local_settings.getRegistryFlag():
+            self.device_name = self.create_attribute_type('Device name', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Device name', skCase)
+            self.device_type = self.create_attribute_type('Device type', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Device type', skCase)
+            self.device_model = self.create_attribute_type('Device model', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Device model', skCase)
+            self.device_maker = self.create_attribute_type('Device maker', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Device maker', skCase)
+        
    
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
@@ -210,9 +225,23 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             except SQLException as e:
                 self.log(Level.INFO, "Could not open database file (not SQLite) " +
                          file.getName() + " (" + e.getMessage() + ")")
-                # TODO : instead of return use a continue to keep on cycling
+                
                 return IngestModule.ProcessResult.OK
-            try:                
+
+            full_path = (file.getParentPath() + file.getName()) 
+            split = full_path.split('/')
+            cdPath = '/'.join(split[:-3])
+            cdpconfig = fileManager.findFiles(dataSource, 'CDPGlobalSettings.cdp' ,cdPath)[0]
+            self.cdpconfigPath = os.path.join(self.temp_dir , str(cdpconfig.getId()))
+            ContentUtils.writeToFile(cdpconfig, File(self.cdpconfigPath))
+            if self.local_settings.getRegistryFlag():
+                dsPath = '/'.join(split[:-6])
+                ntuser = fileManager.findFiles(dataSource, 'NTUSER.DAT' ,dsPath)[0]
+                self.ntuserPath = os.path.join(self.temp_dir , str(ntuser.getId()))
+                ContentUtils.writeToFile(ntuser, File(self.ntuserPath))
+            
+            try: 
+                self.regValues = {}
                 # if set to do so, extract and place on artifact all raw info 
                 if self.local_settings.getRawFlag():
                     stmt = dbConn.createStatement()
@@ -220,8 +249,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     self.extractRawDataFromDB(tableContent, file, blackboard, skCase)
                 stmt = dbConn.createStatement()
                 tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
-                #self.extractProcessedData(tableContent,file,blackboard,skCase)
-                #if set to do so check for anomalies
+                self.extractProcessedData(tableContent,file,blackboard,skCase)
+                #if set to do so, check for anomalies
                 if self.local_settings.getAnomaliesFlag():
                     # ETag anomalies
                     stmt = dbConn.createStatement()
@@ -235,7 +264,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     stmt = dbConn.createStatement()
                     db_update_timestamp = stmt.executeQuery("select Value from Metadata where Key = 'DatabaseInstanceIdUpdateTime'")
                     self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skCase)
-                    
+                #get configs   
+                self.extractConfigFileInfo(file,blackboard,skCase)
             except SQLException as e:
                 self.log(
                     Level.INFO, "Error querying database for smartlookup table (" + e.getMessage() + ")")
@@ -287,6 +317,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
             self.index_artifact(blackboard, art, self.payload_art)
 
+
     def checkForUpdateTimestampAnomalies(self, tableContent, file, blackboard, skCase):
         # mock data
         date_on_config = time.localtime()
@@ -302,6 +333,28 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.index_artifact(blackboard, art, self.update_timestamp_art)
         art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, time.strftime('%H:%M:%S %Y-%m-%d', date_on_config)))
         self.index_artifact(blackboard, art, self.update_timestamp_art)
+
+    def extractConfigFileInfo(self,file,blackboard,skCase):
+        try:
+            with open(self.cdpconfigPath) as f:
+                data = f.read()
+                j = json.loads(data.decode('utf-8-sig').encode('utf-8'))
+                coll = 'Disabled' if j['AfcPrivacySettings']['PublishUserActivity'] else 'Enabled'
+                syncCloud = 'Disabled' if j['AfcPrivacySettings']['UploadUserActivity'] else 'Enabled'
+                listUsers = j['ActivityStoreInfo']
+                for user in listUsers:
+                    art= file.newArtifact(self.config_art.getTypeID())
+                    userActive = 'Enabled' if user['active'] else 'Disabled'
+                    userid = user['stableUserId'].encode('utf-8')
+                    art.addAttribute(BlackboardAttribute(self.cfg_userId_att,WintenTimelineIngestModuleFactory.moduleName,userid))                    
+                    art.addAttribute(BlackboardAttribute(self.cfg_active_att,WintenTimelineIngestModuleFactory.moduleName,userActive))
+                    art.addAttribute(BlackboardAttribute(self.cfg_collect_att,WintenTimelineIngestModuleFactory.moduleName,coll))
+                    art.addAttribute(BlackboardAttribute(self.cfg_up_to_cloud_att,WintenTimelineIngestModuleFactory.moduleName,syncCloud))
+                    self.index_artifact(blackboard,art,self.config_art)
+        except Exception as e:
+            self.log(Level.SEVERE, str(e))
+            return None
+
 
     def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
@@ -324,6 +377,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                         art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
                 self.index_artifact(blackboard, art, self.raw_data_art)
         except Exception as e:
+            self.log(Level.SEVERE, str(e))
             return None
 
 
@@ -365,10 +419,42 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                                 art.addAttribute(BlackboardAttribute(self.json_file_or_url_opened_att, WintenTimelineIngestModuleFactory.moduleName, file_or_urlOpened))
                                 art.addAttribute(BlackboardAttribute(self.json_used_program_att, WintenTimelineIngestModuleFactory.moduleName, used_program))
                                 art.addAttribute(BlackboardAttribute(self.json_timezone_att, WintenTimelineIngestModuleFactory.moduleName, timezone))
+                            elif name == 'PlatformDeviceId' and self.local_settings.getRegistryFlag():
+                                name_val = tableContent.getString('PlatformDeviceId')
+                                if name_val in self.regValues:
+                                    art.addAttribute(BlackboardAttribute(self.device_name, WintenTimelineIngestModuleFactory.moduleName, self.regValues[name_val][0]))
+                                    art.addAttribute(BlackboardAttribute(self.device_model, WintenTimelineIngestModuleFactory.moduleName, self.regValues[name_val][1]))
+                                    art.addAttribute(BlackboardAttribute(self.device_maker, WintenTimelineIngestModuleFactory.moduleName, self.regValues[name_val][2]))
+                                    art.addAttribute(BlackboardAttribute(self.device_type, WintenTimelineIngestModuleFactory.moduleName, self.regValues[name_val][3]))
+                                    
+                                else:
+                                    hive = Registry.Registry(self.ntuserPath)
+                                    key = hive.open("Software\\Microsoft\\Windows\\CurrentVersion\\TaskFlow\\DeviceCache\\"+name_val)
+                                    aux = {1:"Xbox One", 6:"Apple iPhone", 7:"Apple iPad", 8:"Android device", 9:"Windows 10 Desktop", 11:"Windows 10 Phone", 12:"Linux device", 13:"Windows  IoT", 14:"Surface Hub", 15:"Windows Laptop"}                                
+                                    listVals = []
+
+                                    for keyname in ['DeviceName','DeviceModel','DeviceMake']: #this is some monkey-level fix for weird decoding
+                                        charList  = []
+                                        byteString = bytes(key[keyname].value().encode('utf-16be'))                                                                  
+                                        for c in byteString:
+                                            if c in stringModule.printable:
+                                                charList.append(c)                                            
+                                        stringFixed = ''.join(charList)
+                                        self.log(Level.INFO, stringFixed)
+                                        listVals.append(stringFixed)
+                                        
+                                    listVals.append(aux[key['DeviceType'].value()].encode('utf-8'))
+                                    art.addAttribute(BlackboardAttribute(self.device_name, WintenTimelineIngestModuleFactory.moduleName,  listVals[0]))
+                                    art.addAttribute(BlackboardAttribute(self.device_model, WintenTimelineIngestModuleFactory.moduleName, listVals[1]))
+                                    art.addAttribute(BlackboardAttribute(self.device_maker, WintenTimelineIngestModuleFactory.moduleName, listVals[2]))
+                                    art.addAttribute(BlackboardAttribute(self.device_type, WintenTimelineIngestModuleFactory.moduleName,  listVals[3]))
+                                    self.regValues[name_val] = listVals
                             else:
                                 art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                                
                 self.index_artifact(blackboard, art, self.proc_data_art)
         except Exception as e:
+            self.log(Level.SEVERE, str(e))
             return None
    
 
