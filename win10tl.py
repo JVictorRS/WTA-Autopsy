@@ -173,8 +173,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
         self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
         # create attribute types for update_timestamp
-        self.date_on_db = self.create_attribute_type('Date Saved On Metadata', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date Saved On Metadata', skcase)
-        self.date_on_config_file = self.create_attribute_type('Date on config file', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date on config file', skcase)
+        self.date_on_db = self.create_attribute_type('Date Saved On Metadata', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date Saved On Metadata', skCase)
+        self.date_on_config_file = self.create_attribute_type('Date on config file', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date on config file', skCase)
         #create main art
         self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
         #create raw art if applicable
@@ -183,7 +183,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         if self.local_settings.getAnomaliesFlag():           
             self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)       
             self.payload_art = self.create_artifact_type("TSK_WTA_P_ANOMALIES", "SmartLookup anomalous payload content", skCase)
-            self.update_timestamp_art = self.create_artifact_type("TSK_WTA_T_ANOMALIES", "Metadata anomalous update timestamp")
+            self.update_timestamp_art = self.create_artifact_type("TSK_WTA_T_ANOMALIES", "Metadata anomalous update timestamp", skCase)
    
     # Where the analysis is done.
     # The 'dataSource' object being passed in is of type org.sleuthkit.datamodel.Content.
@@ -234,7 +234,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     # Update Timestamp anomalies
                     stmt = dbConn.createStatement()
                     db_update_timestamp = stmt.executeQuery("select Value from Metadata where Key = 'DatabaseInstanceIdUpdateTime'")
-                    self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skcase)
+                    self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skCase)
                     
             except SQLException as e:
                 self.log(
@@ -288,28 +288,20 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             self.index_artifact(blackboard, art, self.payload_art)
 
     def checkForUpdateTimestampAnomalies(self, tableContent, file, blackboard, skCase):
-        fileToCompare = 'file with date to compare'
-        date_saved_on_database = time.strptime(db_update_timestamp)
-        date_on_config = time.strptime()
-        isEmpty = True
-        while tableContent.next():
-            isEmpty = False
-            art = file.newArtifact(self.update_timestamp_art.getTypeID())
-            for name in self.update_timestamp_list:
-                foo = tableContent.getString(name)
-                self.log(Level.INFO, "NAME:" + name)
-                if(foo is None && name == 'Date Saved On Metadata'):
-                    foo = "N/A"
-                else:
-                    foo = date_on_config
-                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-            self.index_artifact(blackboard, art, self.update_timestamp_art)
-            if isEmpty:
-                self.log(Level.INFO, "Update Timestamp not found, may have been deleted")
-                art = file.newArtifact(self.update_timestamp_art.getTypeID())
-                art.addAttribute(BlackboardAttribute(self.date_on_db, WintenTimelineIngestModuleFactory.moduleName, "Timestamp not found"))
-                art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, "Timestamp not found"))
-                self.index_artifact(blackboard, art, self.update_timestamp_art)
+        # mock data
+        date_on_config = time.localtime()
+
+        art = file.newArtifact(self.update_timestamp_art.getTypeID())
+        foo = tableContent.getString('Value')
+        self.log(Level.INFO, "Date on Metadata table (before parsing): " + foo)
+        date_saved_on_database = time.strftime('%H:%M:%S %Y-%m-%d', time.strptime(foo, '%Y-%m-%dT%H:%M:%S.%fZ'))
+        self.log(Level.INFO, "Date on Metadata table (after parsing): " + date_saved_on_database)
+        if foo is None:
+            foo = "N/A"
+        art.addAttribute(BlackboardAttribute(self.date_on_db, WintenTimelineIngestModuleFactory.moduleName, date_saved_on_database))
+        self.index_artifact(blackboard, art, self.update_timestamp_art)
+        art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, time.strftime('%H:%M:%S %Y-%m-%d', date_on_config)))
+        self.index_artifact(blackboard, art, self.update_timestamp_art)
 
     def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
