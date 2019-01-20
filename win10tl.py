@@ -1,7 +1,4 @@
-<<<<<<< HEAD
-=======
-# -*- coding: utf-8 -*-
->>>>>>> 1f96ad21eb22b3037a5d1b5e5522c5b86ec47b0d
+
 import jarray
 import inspect
 import os
@@ -168,6 +165,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
         self.etag_names_list = ['Id', 'ETag']
         self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
+        self.update_timestamp_list = ['Date Saved On Metadata', 'Date on config file']
         #create atts for the entire extraction 
         for name in self.raw_names_list:
             self.generic_att[name] = self.create_attribute_type(name, BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, name, skCase)
@@ -177,6 +175,9 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.json_file_or_url_opened_att = self.create_attribute_type('File or URL Opened', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'File or URL Opened', skCase)
         self.json_used_program_att = self.create_attribute_type('Used Program', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Used Program', skCase)
         self.json_timezone_att = self.create_attribute_type('Timezone', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Timezone', skCase)
+        # create attribute types for update_timestamp
+        self.date_on_db = self.create_attribute_type('Date Saved On Metadata', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date Saved On Metadata', skCase)
+        self.date_on_config_file = self.create_attribute_type('Date on config file', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Date on config file', skCase)
         #create main art
         self.proc_data_art = self.create_artifact_type("TSK_WTA_SmartLU_Proc", "Processed content from SmartLookup", skCase)
         #create raw art if applicable
@@ -185,6 +186,8 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         if self.local_settings.getAnomaliesFlag():           
             self.etag_art = self.create_artifact_type("TSK_WTA_ANOMALIES", "SmartLookup anomalous content", skCase)       
             self.payload_art = self.create_artifact_type("TSK_WTA_P_ANOMALIES", "SmartLookup anomalous payload content", skCase)
+            self.update_timestamp_art = self.create_artifact_type("TSK_WTA_T_ANOMALIES", "Metadata anomalous update timestamp", skCase)
+
         self.cfg_active_att = self.create_attribute_type('User Timeline Status', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User timeline status', skCase)
         self.cfg_userId_att = self.create_attribute_type('User Id', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'User Id', skCase)
         self.cfg_up_to_cloud_att = self.create_attribute_type('Sync with cloud', BlackboardAttribute.TSK_BLACKBOARD_ATTRIBUTE_VALUE_TYPE.STRING, 'Sync with cloud', skCase)
@@ -257,6 +260,10 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     stmt = dbConn.createStatement()
                     payload_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', OriginalPayload, Payload from SmartLookup where ifnull(Payload, '') != ifnull(OriginalPayload, '')")
                     self.checkForPayloadAnomalies(payload_anomalies_content, file, blackboard, skCase)
+                    # Update Timestamp anomalies
+                    stmt = dbConn.createStatement()
+                    db_update_timestamp = stmt.executeQuery("select Value from Metadata where Key = 'DatabaseInstanceIdUpdateTime'")
+                    self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skCase)
                 #get configs   
                 self.extractConfigFileInfo(file,blackboard,skCase)
             except SQLException as e:
@@ -310,6 +317,23 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
             art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
             self.index_artifact(blackboard, art, self.payload_art)
 
+
+    def checkForUpdateTimestampAnomalies(self, tableContent, file, blackboard, skCase):
+        # mock data
+        date_on_config = time.localtime()
+
+        art = file.newArtifact(self.update_timestamp_art.getTypeID())
+        foo = tableContent.getString('Value')
+        self.log(Level.INFO, "Date on Metadata table (before parsing): " + foo)
+        date_saved_on_database = time.strftime('%H:%M:%S %Y-%m-%d', time.strptime(foo, '%Y-%m-%dT%H:%M:%S.%fZ'))
+        self.log(Level.INFO, "Date on Metadata table (after parsing): " + date_saved_on_database)
+        if foo is None:
+            foo = "N/A"
+        art.addAttribute(BlackboardAttribute(self.date_on_db, WintenTimelineIngestModuleFactory.moduleName, date_saved_on_database))
+        self.index_artifact(blackboard, art, self.update_timestamp_art)
+        art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, time.strftime('%H:%M:%S %Y-%m-%d', date_on_config)))
+        self.index_artifact(blackboard, art, self.update_timestamp_art)
+
     def extractConfigFileInfo(self,file,blackboard,skCase):
         try:
             with open(self.cdpconfigPath) as f:
@@ -330,6 +354,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         except Exception as e:
             self.log(Level.SEVERE, str(e))
             return None
+
 
     def extractRawDataFromDB(self, tableContent, file, blackboard, skCase):
         try:
