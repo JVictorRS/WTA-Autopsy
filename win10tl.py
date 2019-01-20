@@ -160,7 +160,7 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         self.generic_att = {}
         #create lists for each type of artefact
         self.raw_names_list = ['Id', 'AppId', 'PackageIdHash', 'AppActivityId', 'ActivityType', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'Priority', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'OriginalPayload', 'OriginalLastModifiedOnClient', 'ETag']        
-        self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'GroupAppActivityId', 'ClipboardPayload', 'EnterpriseId', 'ETag']        
+        self.proc_names_list = ['Id', 'AppId', 'ActivityStatus', 'LastModifiedTime', 'ExpirationTime', 'Payload', 'IsLocalOnly', 'PlatformDeviceId', 'CreatedInCloud', 'StartTime', 'EndTime', 'LastModifiedOnClient', 'ClipboardPayload', 'ETag']        
         self.etag_names_list = ['Id', 'ETag']
         self.payload_names_list = ['Id', 'OriginalPayload', 'Payload']
         self.etag_names_list = ['Id', 'ETag']
@@ -222,24 +222,28 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                 Class.forName("org.sqlite.JDBC").newInstance()
                 dbConn = DriverManager.getConnection(
                     "jdbc:sqlite:%s" % wtaDbPath)
-            except SQLException as e:
+            except Exception as e:
                 self.log(Level.INFO, "Could not open database file (not SQLite) " +
-                         file.getName() + " (" + e.getMessage() + ")")
+                         file.getName() + " (" + str(e) + ")")
+                continue
                 
-                return IngestModule.ProcessResult.OK
-
-            full_path = (file.getParentPath() + file.getName()) 
-            split = full_path.split('/')
-            cdPath = '/'.join(split[:-3])
-            cdpconfig = fileManager.findFiles(dataSource, 'CDPGlobalSettings.cdp' ,cdPath)[0]
-            self.cdpconfigPath = os.path.join(self.temp_dir , str(cdpconfig.getId()))
-            ContentUtils.writeToFile(cdpconfig, File(self.cdpconfigPath))
-            if self.local_settings.getRegistryFlag():
-                dsPath = '/'.join(split[:-6])
-                ntuser = fileManager.findFiles(dataSource, 'NTUSER.DAT' ,dsPath)[0]
-                self.ntuserPath = os.path.join(self.temp_dir , str(ntuser.getId()))
-                ContentUtils.writeToFile(ntuser, File(self.ntuserPath))
-            
+            try:
+                full_path = (file.getParentPath() + file.getName()) 
+                split = full_path.split('/')
+                cdPath = '/'.join(split[:-3])
+                cdpconfig = fileManager.findFiles(dataSource, 'CDPGlobalSettings.cdp' ,cdPath)
+                if cdpconfig:
+                    self.cdpconfigPath = os.path.join(self.temp_dir , str(cdpconfig[0].getId()))
+                    ContentUtils.writeToFile(cdpconfig[0], File(self.cdpconfigPath))
+                else:
+                    self.cdpconfigPath = 0
+                if self.local_settings.getRegistryFlag():
+                    dsPath = '/'.join(split[:-6])
+                    ntuser = fileManager.findFiles(dataSource, 'NTUSER.DAT' ,dsPath)[0]
+                    self.ntuserPath = os.path.join(self.temp_dir , str(ntuser.getId()))
+                    ContentUtils.writeToFile(ntuser, File(self.ntuserPath))
+            except Exception as e:
+                self.log(Level.INFO, str(e) )
             try: 
                 self.regValues = {}
                 # if set to do so, extract and place on artifact all raw info 
@@ -248,10 +252,13 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                  
                     self.extractRawDataFromDB(tableContent, file, blackboard, skCase)
                 stmt = dbConn.createStatement()
-                tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, GroupAppActivityId, ClipboardPayload, EnterpriseId, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
+                tableContent = stmt.executeQuery("select hex(Id) 'Id', AppId, PackageIdHash, AppActivityId, ActivityType, ActivityStatus, LastModifiedTime, ExpirationTime, Payload, Priority, IsLocalOnly, PlatformDeviceId, CreatedInCloud, StartTime, EndTime, LastModifiedOnClient, ClipboardPayload, OriginalPayload, OriginalLastModifiedOnClient, ETag from SmartLookup")                                
                 self.extractProcessedData(tableContent,file,blackboard,skCase)
                 #if set to do so, check for anomalies
                 if self.local_settings.getAnomaliesFlag():
+                    specificConfig = fileManager.findFiles(dataSource, split[-2]+'.cdp' ,cdPath)
+                    self.specConfigPath = os.path.join(self.temp_dir , str(specificConfig[0].getId()))
+                    ContentUtils.writeToFile(specificConfig[0], File(self.specConfigPath))
                     # ETag anomalies
                     stmt = dbConn.createStatement()
                     etag_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', ETag from SmartLookup where SmartLookup.ETag > (select Value from ManualSequence)")                    
@@ -261,9 +268,10 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                     payload_anomalies_content = stmt.executeQuery("select hex(Id) 'Id', OriginalPayload, Payload from SmartLookup where ifnull(Payload, '') != ifnull(OriginalPayload, '')")
                     self.checkForPayloadAnomalies(payload_anomalies_content, file, blackboard, skCase)
                     # Update Timestamp anomalies
-                    stmt = dbConn.createStatement()
-                    db_update_timestamp = stmt.executeQuery("select Value from Metadata where Key = 'DatabaseInstanceIdUpdateTime'")
-                    self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skCase)
+                    if specificConfig:
+                        stmt = dbConn.createStatement()
+                        db_update_timestamp = stmt.executeQuery("select Value from Metadata where Key = 'DatabaseInstanceIdUpdateTime'")
+                        self.checkForUpdateTimestampAnomalies(db_update_timestamp, file, blackboard, skCase)
                 #get configs   
                 self.extractConfigFileInfo(file,blackboard,skCase)
             except SQLException as e:
@@ -278,64 +286,78 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
         return IngestModule.ProcessResult.OK
 
     def checkForAnomalies(self, tableContent, file, blackboard, skCase):
-        isEmpty = True
-        while tableContent.next():
-            isEmpty =False
-            art = file.newArtifact(self.etag_art.getTypeID())
-            for name in self.etag_names_list:
-                foo = tableContent.getString(name)
-                self.log(Level.INFO, "NAME:" + name)
-                if(foo is None):
-                    foo = "N/A"
-                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-            self.index_artifact(blackboard, art, self.etag_art)
-        if isEmpty:
-            self.log(Level.INFO, "ETag anomalies not found")
-            art = file.newArtifact(self.etag_art.getTypeID())
-            art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-            art.addAttribute(BlackboardAttribute(self.generic_att['ETag'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-            self.index_artifact(blackboard, art, self.etag_art)
-                    
+        try:
+            isEmpty = True
+            while tableContent.next():
+                isEmpty =False
+                art = file.newArtifact(self.etag_art.getTypeID())
+                for name in self.etag_names_list:
+                    foo = tableContent.getString(name)
+                    self.log(Level.INFO, "NAME:" + name)
+                    if(foo is None):
+                        foo = "N/A"
+                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                self.index_artifact(blackboard, art, self.etag_art)
+            if isEmpty:
+                self.log(Level.INFO, "ETag anomalies not found")
+                art = file.newArtifact(self.etag_art.getTypeID())
+                art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+                art.addAttribute(BlackboardAttribute(self.generic_att['ETag'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+                self.index_artifact(blackboard, art, self.etag_art)
+        except Exception as e:
+            self.log(Level.SEVERE, str(e))
+            return None
+
 
     def checkForPayloadAnomalies(self, tableContent, file, blackboard, skCase):
-        isEmpty = True
-        while tableContent.next():
-            isEmpty = False
-            art = file.newArtifact(self.payload_art.getTypeID())
-            for name in self.payload_names_list:
-                foo = tableContent.getString(name)
-                self.log(Level.INFO, "NAME:" + name)
-                if(foo is None):
-                    foo = "N/A"
-                art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
-            self.index_artifact(blackboard, art, self.payload_art)
-        if isEmpty:
-            self.log(Level.INFO, "Payload anomalies not found")
-            art = file.newArtifact(self.payload_art.getTypeID())
-            art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-            art.addAttribute(BlackboardAttribute(self.generic_att['OriginalPayload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-            art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
-            self.index_artifact(blackboard, art, self.payload_art)
-
+        try:
+            isEmpty = True
+            while tableContent.next():
+                isEmpty = False
+                art = file.newArtifact(self.payload_art.getTypeID())
+                for name in self.payload_names_list:
+                    foo = tableContent.getString(name)
+                    self.log(Level.INFO, "NAME:" + name)
+                    if(foo is None):
+                        foo = "N/A"
+                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, foo.encode('utf-8')))
+                self.index_artifact(blackboard, art, self.payload_art)
+            if isEmpty:
+                self.log(Level.INFO, "Payload anomalies not found")
+                art = file.newArtifact(self.payload_art.getTypeID())
+                art.addAttribute(BlackboardAttribute(self.generic_att['Id'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+                art.addAttribute(BlackboardAttribute(self.generic_att['OriginalPayload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+                art.addAttribute(BlackboardAttribute(self.generic_att['Payload'], WintenTimelineIngestModuleFactory.moduleName, "No results found"))
+                self.index_artifact(blackboard, art, self.payload_art)
+        except Exception as e:
+            self.log(Level.SEVERE, str(e))
+            return None
 
     def checkForUpdateTimestampAnomalies(self, tableContent, file, blackboard, skCase):
-        # mock data
-        date_on_config = time.localtime()
+        try:
+            with open(self.specConfigPath) as f:
+                data= f.read()
+                j = json.loads(data.decode('utf-8-sig').encode('utf-8'))
+                date_on_config = j['AfcDatabaseSettings']['LastUpdated']
 
-        art = file.newArtifact(self.update_timestamp_art.getTypeID())
-        foo = tableContent.getString('Value')
-        self.log(Level.INFO, "Date on Metadata table (before parsing): " + foo)
-        date_saved_on_database = time.strftime('%H:%M:%S %Y-%m-%d', time.strptime(foo, '%Y-%m-%dT%H:%M:%S.%fZ'))
-        self.log(Level.INFO, "Date on Metadata table (after parsing): " + date_saved_on_database)
-        if foo is None:
-            foo = "N/A"
-        art.addAttribute(BlackboardAttribute(self.date_on_db, WintenTimelineIngestModuleFactory.moduleName, date_saved_on_database))
-        self.index_artifact(blackboard, art, self.update_timestamp_art)
-        art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, time.strftime('%H:%M:%S %Y-%m-%d', date_on_config)))
-        self.index_artifact(blackboard, art, self.update_timestamp_art)
-
+            art = file.newArtifact(self.update_timestamp_art.getTypeID())
+            foo = tableContent.getString('Value')
+            self.log(Level.INFO, "Date on Metadata table (before parsing): " + foo)
+            date_saved_on_database = time.strftime('%H:%M:%S %Y-%m-%d', time.strptime(foo, '%Y-%m-%dT%H:%M:%S.%fZ'))
+            self.log(Level.INFO, "Date on Metadata table (after parsing): " + date_saved_on_database)
+            if foo is None:
+                foo = "N/A"
+            art.addAttribute(BlackboardAttribute(self.date_on_db, WintenTimelineIngestModuleFactory.moduleName, date_saved_on_database))
+            self.index_artifact(blackboard, art, self.update_timestamp_art)
+            art.addAttribute(BlackboardAttribute(self.date_on_config_file, WintenTimelineIngestModuleFactory.moduleName, date_on_config))
+            self.index_artifact(blackboard, art, self.update_timestamp_art)
+        except Exception as e:
+            self.log(Level.SEVERE, str(e))
+            return None
     def extractConfigFileInfo(self,file,blackboard,skCase):
         try:
+            if self.cdpconfigPath == 0:
+                return
             with open(self.cdpconfigPath) as f:
                 data = f.read()
                 j = json.loads(data.decode('utf-8-sig').encode('utf-8'))
@@ -419,6 +441,15 @@ class WintenTimelineIngestModule(DataSourceIngestModule):
                                 art.addAttribute(BlackboardAttribute(self.json_file_or_url_opened_att, WintenTimelineIngestModuleFactory.moduleName, file_or_urlOpened))
                                 art.addAttribute(BlackboardAttribute(self.json_used_program_att, WintenTimelineIngestModuleFactory.moduleName, used_program))
                                 art.addAttribute(BlackboardAttribute(self.json_timezone_att, WintenTimelineIngestModuleFactory.moduleName, timezone))
+                            elif(name == 'ActivityStatus'):
+                                if foo == '1':
+                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, 'Active'))
+                                elif foo =='2':
+                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, 'Updated'))
+                                elif foo == '3':
+                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, 'Deleted'))
+                                else:
+                                    art.addAttribute(BlackboardAttribute(self.generic_att[str(name)], WintenTimelineIngestModuleFactory.moduleName, 'Ignored'))
                             elif name == 'PlatformDeviceId' and self.local_settings.getRegistryFlag():
                                 name_val = tableContent.getString('PlatformDeviceId')
                                 if name_val in self.regValues:
